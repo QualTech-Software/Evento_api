@@ -23,35 +23,113 @@ router.get("/", function (req, res) {
 });
 
 //API EVENTSFILES
-
-router.post("/event-files", upload.single("filename"), async (req, res) => {
+router.post("/event-files", upload.array("filename", 4), async (req, res) => {
   try {
     const { event_id } = req.body;
-    const { filename, mimetype } = req.file;
 
-    // Insert file information into the database
-    const query = `INSERT INTO Event_Files (event_id, filename, type, path) VALUES (?, ?, ?, ?)`;
-    conn.query(
-      query,
-      [event_id, filename, mimetype, req.file.path],
-      function (err, result) {
-        if (err) {
-          console.error(err);
-          res
-            .status(500)
-            .json({ success: false, message: "Failed to upload file" });
-          return;
-        }
-        console.log("File uploaded successfully");
-        res.json({ success: true, message: "File uploaded successfully" });
+    if (!event_id) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing event_id in request body" });
+    }
+
+    // Check if there are already four files uploaded for this event_id
+    const countQuery =
+      "SELECT COUNT(*) AS fileCount FROM Event_Files WHERE event_id = ?";
+    conn.query(countQuery, [event_id], async (err, rows) => {
+      if (err) {
+        console.error("Error querying database:", err);
+        return res
+          .status(500)
+          .json({ success: false, message: "Failed to upload file" });
       }
-    );
+
+      const fileCount = rows[0].fileCount;
+
+      // If there are already four files uploaded, reject the upload
+      if (fileCount >= 4) {
+        return res.status(400).json({
+          success: false,
+          message: "Maximum number of files already uploaded for this event",
+        });
+      }
+
+      // Process each file in the request
+      for (const file of req.files) {
+        const { filename, mimetype } = file;
+        const timestamp = Date.now();
+        // Construct new filename to ensure uniqueness
+        const newFilename = `img_${event_id}_${timestamp}${path.extname(
+          filename
+        )}`;
+        // Construct the path that will be saved in the database
+        const savePath = `uploads/${newFilename}`;
+
+        // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
+        if (!["image/png", "image/jpeg", "image/gif"].includes(mimetype)) {
+          console.error("Invalid mimetype:", mimetype);
+          continue; // Skip saving the file to the database
+        }
+
+        // Insert file information into the database, including created_at
+        const query =
+          "INSERT INTO Event_Files (event_id, filename, type, path, created_at) VALUES (?, ?, ?, ?, NOW())";
+        await conn.query(query, [event_id, newFilename, mimetype, savePath]);
+      }
+
+      console.log("Files uploaded successfully");
+      res.json({ success: true, message: "Files uploaded successfully" });
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Failed to upload file" });
+    console.error("Error uploading files:", err);
+    res.status(500).json({ success: false, message: "Failed to upload files" });
   }
 });
+router.get("/event-files", (req, res, next) => {
+  const query = "SELECT * FROM Event_Files";
 
+  conn.query(query, (err, results) => {
+    if (err) {
+      console.error("Error querying database:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch uploaded files" });
+    }
+    res.status(200).json({ success: true, files: results });
+  });
+});
+
+//API for EVENT-CATEGORIES
+router.post("/categories", (req, res, next) => {
+  const query = "SELECT * FROM categories";
+
+  conn.query(query, (err, results) => {
+    if (err) {
+      console.error("Error fetching categories:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch categories" });
+    }
+
+    res.status(200).json({ success: true, categories: results });
+  });
+});
+
+// Route handler for getting all event categories
+router.get("/categories", (req, res, next) => {
+  const query = "SELECT * FROM categories";
+
+  conn.query(query, (err, results) => {
+    if (err) {
+      console.error("Error fetching categories:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch categories" });
+    }
+
+    res.status(200).json({ success: true, categories: results });
+  });
+});
 // POST route to create a new event
 router.post("/events", (req, res, next) => {
   const {
@@ -69,8 +147,28 @@ router.post("/events", (req, res, next) => {
     additional_information,
     rules_regulations,
   } = req.body;
-  const query = `INSERT INTO Events (title, category_id, start_date_time, end_date_time, is_online, location, address, city, state, country, zip_code, additional_information, rules_regulations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+  // Construct the INSERT query with the uploaded_at column
+  const query = `
+    INSERT INTO Events (
+      title, 
+      category_id, 
+      start_date_time, 
+      end_date_time, 
+      is_online, 
+      location, 
+      address, 
+      city, 
+      state, 
+      country, 
+      zip_code, 
+      additional_information, 
+      rules_regulations,
+      uploaded_at
+    ) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`;
+
+  // Execute the INSERT query with the uploaded_at column
   conn.query(
     query,
     [
