@@ -3,17 +3,20 @@ const router = express.Router();
 const multer = require("multer");
 const conn = require("./dbConnection");
 const path = require("path");
+const { json } = require("body-parser");
 
 // Define storage configuration for multer
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // Specify the destination directory where uploaded files will be stored
-    //ToDo-It is Temporory Folder we will move to s3 bucket
-    cb(null, path.join(__dirname, "/uploads"));
+    cb(null, path.join(__dirname, "uploads"));
   },
   filename: function (req, file, cb) {
-    // Use the original filename of the uploaded file
-    cb(null, file.originalname);
+    // Temporary unique name for the file
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(
+      null,
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
+    );
   },
 });
 const upload = multer({ storage: storage });
@@ -100,20 +103,106 @@ router.get("/event-files", (req, res, next) => {
 });
 
 //API for EVENT-CATEGORIES
-router.post("/categories", (req, res, next) => {
-  const query = "SELECT * FROM categories";
+router.post(
+  "/categories",
+  upload.fields([
+    { name: "hero_img", maxCount: 1 },
+    { name: "logo_img", maxCount: 1 },
+  ]),
+  (req, res, next) => {
+    // Extract required data from the request body
+    const { name, is_active } = req.body;
+    const hero_img = req.files["hero_img"][0];
+    const logo_img = req.files["logo_img"][0];
 
-  conn.query(query, (err, results) => {
-    if (err) {
-      console.error("Error fetching categories:", err);
-      return res
-        .status(500)
-        .json({ success: false, message: "Failed to fetch categories" });
-    }
+    // Ensure file extensions are lowercase
+    const hero_img_extension = hero_img.originalname
+      .split(".")
+      .pop()
+      .toLowerCase();
+    const logo_img_extension = logo_img.originalname
+      .split(".")
+      .pop()
+      .toLowerCase();
 
-    res.status(200).json({ success: true, categories: results });
-  });
-});
+    // Query the database to fetch the category_id for the given category name
+    const categoryIdQuery = `
+      SELECT category_id FROM categories WHERE name = ?
+    `;
+
+    conn.query(categoryIdQuery, [name], (queryErr, queryResult) => {
+      if (queryErr) {
+        console.error("Error fetching category_id:", queryErr);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to fetch category_id",
+          error: queryErr.message, // Return the error message for debugging
+        });
+      }
+
+      if (queryResult.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Category not found",
+        });
+      }
+
+      const categoryId = queryResult[0].category_id;
+
+      // Generate timestamp
+      const timestamp = Date.now();
+
+      // Construct the paths with file extensions
+      const heroImgPath = `category_heroimg_${categoryId}_${timestamp}.${hero_img_extension}`;
+      const logoImgPath = `category_iconimg_${categoryId}_${timestamp}.${logo_img_extension}`;
+
+      const heroImgNewPath = path.join(__dirname, "uploads", heroImgPath);
+      const logoImgNewPath = path.join(__dirname, "uploads", logoImgPath);
+
+      // Construct the SQL query to insert a new category into the database
+      const query = `
+        INSERT INTO categories (category_id, name, hero_img, logo_img, is_active) 
+        VALUES (?, ?, ?, ?, ?)
+      `;
+
+      const isActiveInt = is_active ? 1 : 0;
+
+      // Execute the query
+      conn.query(
+        query,
+        [
+          categoryId,
+          name,
+          heroImgPath,
+          logoImgPath,
+          isActiveInt,
+          heroImgNewPath,
+          logoImgNewPath,
+        ],
+        (err, result) => {
+          if (err) {
+            console.error("Error creating category:", err);
+            return res.status(500).json({
+              success: false,
+              message: "Failed to create category",
+              error: err.message, // Return the error message for debugging
+            });
+          }
+
+          // Return success response if the category was created successfully
+          res.status(201).json({
+            success: true,
+            message: "Category created successfully",
+            category_id: categoryId,
+            hero_img_path: heroImgPath,
+
+            logo_img_path: logoImgPath,
+          });
+        }
+      );
+    });
+  }
+);
 
 // Route handler for getting all event categories
 router.get("/categories", (req, res, next) => {
