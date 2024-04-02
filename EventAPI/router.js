@@ -36,58 +36,40 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
         .json({ success: false, message: "Missing event_id in request body" });
     }
 
-    // Check if there are already four files uploaded for this event_id
-    const countQuery =
-      "SELECT COUNT(*) AS fileCount FROM Event_Files WHERE event_id = ?";
-    conn.query(countQuery, [event_id], async (err, rows) => {
-      if (err) {
-        console.error("Error querying database:", err);
-        return res
-          .status(500)
-          .json({ success: false, message: "Failed to upload file" });
+    // Process each file in the request
+    for (const file of req.files) {
+      const { filename, mimetype } = file;
+
+      // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
+      if (!["image/png", "image/jpeg", "image/jpg"].includes(mimetype)) {
+        console.error("Invalid mimetype:", mimetype);
+        // Delete the file if it doesn't have a valid extension
+        fs.unlinkSync(file.path);
+        continue; // Skip saving the file to the database
       }
 
-      const fileCount = rows[0].fileCount;
+      const timestamp = Date.now();
+      // Construct new filename to ensure uniqueness
+      const newFilename = `img_${event_id}_${timestamp}${path.extname(
+        filename
+      )}`;
+      // Construct the path that will be saved in the database
+      const savePath = `uploads/${newFilename}`;
 
-      // If there are already four files uploaded, reject the upload
-      if (fileCount >= 4) {
-        return res.status(400).json({
-          success: false,
-          message: "Maximum number of files already uploaded for this event",
-        });
-      }
+      // Insert file information into the database, including created_at
+      const query =
+        "INSERT INTO Event_Files (event_id, filename, type, path, created_at) VALUES (?, ?, ?, ?, NOW())";
+      await conn.query(query, [event_id, newFilename, mimetype, savePath]);
+    }
 
-      // Process each file in the request
-      for (const file of req.files) {
-        const { filename, mimetype } = file;
-        const timestamp = Date.now();
-        // Construct new filename to ensure uniqueness
-        const newFilename = `img_${event_id}_${timestamp}${path.extname(
-          filename
-        )}`;
-        // Construct the path that will be saved in the database
-        const savePath = `uploads/${newFilename}`;
-
-        // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
-        if (!["image/png", "image/jpeg", "image/gif"].includes(mimetype)) {
-          console.error("Invalid mimetype:", mimetype);
-          continue; // Skip saving the file to the database
-        }
-
-        // Insert file information into the database, including created_at
-        const query =
-          "INSERT INTO Event_Files (event_id, filename, type, path, created_at) VALUES (?, ?, ?, ?, NOW())";
-        await conn.query(query, [event_id, newFilename, mimetype, savePath]);
-      }
-
-      console.log("Files uploaded successfully");
-      res.json({ success: true, message: "Files uploaded successfully" });
-    });
+    console.log("Files uploaded successfully");
+    res.json({ success: true, message: "Files uploaded successfully" });
   } catch (err) {
     console.error("Error uploading files:", err);
-    res.status(500).json({ success: false, message: "Failed to upload files" });
+    res.status(500).json({ success: false, message: "Invalid File Format" });
   }
 });
+
 router.get("/event-files", (req, res, next) => {
   const query = "SELECT * FROM Event_Files";
 
@@ -125,6 +107,40 @@ router.post(
       .pop()
       .toLowerCase();
 
+    // Check if file extensions are valid
+    const allowedExtensions = ["png", "jpg", "jpeg"];
+    if (
+      !allowedExtensions.includes(hero_img_extension) ||
+      !allowedExtensions.includes(logo_img_extension)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid file type. Only PNG, JPG, and JPEG files are allowed.",
+      });
+    }
+
+    // Map various input formats of is_active to corresponding integer values
+    let isActiveInt;
+    if (
+      is_active === "1" ||
+      is_active.toLowerCase() === "true" ||
+      is_active.toLowerCase() === "yes"
+    ) {
+      isActiveInt = 1;
+    } else if (
+      is_active === "0" ||
+      is_active.toLowerCase() === "false" ||
+      is_active.toLowerCase() === "no"
+    ) {
+      isActiveInt = 0;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid value for is_active.",
+      });
+    }
+
     // Query the database to fetch the category_id for the given category name
     const categoryIdQuery = `
       SELECT category_id FROM categories WHERE name = ?
@@ -140,12 +156,12 @@ router.post(
         });
       }
 
-      if (queryResult.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Category not found",
-        });
-      }
+      // if (queryResult.length === 0) {
+      //   return res.status(404).json({
+      //     success: false,
+      //     message: "Category not found",
+      //   });
+      // }
 
       const categoryId = queryResult[0].category_id;
 
@@ -164,8 +180,6 @@ router.post(
         INSERT INTO categories (category_id, name, hero_img, logo_img, is_active) 
         VALUES (?, ?, ?, ?, ?)
       `;
-
-      const isActiveInt = is_active ? 1 : 0;
 
       // Execute the query
       conn.query(
@@ -195,7 +209,6 @@ router.post(
             message: "Category created successfully",
             category_id: categoryId,
             hero_img_path: heroImgPath,
-
             logo_img_path: logoImgPath,
           });
         }
@@ -205,10 +218,11 @@ router.post(
 );
 
 // Route handler for getting all event categories
-router.get("/categories", (req, res, next) => {
-  const query = "SELECT * FROM categories";
+router.get("/categories/:category_id", (req, res, next) => {
+  const categoryId = req.params.category_id;
+  const query = "SELECT * FROM categories WHERE category_id = ?";
 
-  conn.query(query, (err, results) => {
+  conn.query(query, [categoryId], (err, results) => {
     if (err) {
       console.error("Error fetching categories:", err);
       return res
@@ -220,7 +234,7 @@ router.get("/categories", (req, res, next) => {
   });
 });
 // POST route to create a new event
-router.post("/events", (req, res, next) => {
+router.post("/event", (req, res, next) => {
   const {
     title,
     category_id,
@@ -236,6 +250,25 @@ router.post("/events", (req, res, next) => {
     additional_information,
     rules_regulations,
   } = req.body;
+
+  // Validate city, state, and country to ensure they are strings
+  if (
+    typeof city !== "string" ||
+    typeof state !== "string" ||
+    typeof country !== "string"
+  ) {
+    return res
+      .status(400)
+      .json({ message: "City, state, and country must be strings" });
+  }
+
+  // Ensure city, state, and country match the expected format
+  const regex = /^[a-zA-Z]+$/;
+  if (!regex.test(city) || !regex.test(state) || !regex.test(country)) {
+    return res
+      .status(400)
+      .json({ message: "Invalid characters in city, state, or country name" });
+  }
 
   // Construct the INSERT query with the uploaded_at column
   const query = `
@@ -294,9 +327,55 @@ router.get("/events", (req, res, next) => {
     res.status(200).json(results);
   });
 });
+//GET for given id
+router.get("/event/:id", (req, res, next) => {
+  const eventId = req.params.id;
+  const query = `
+    SELECT Event_Files.filename, Event_Files.path
+    FROM Events
+    INNER JOIN Event_Files ON Events.id = Event_Files.event_id
+    WHERE Events.id = ?
+  `;
+
+  var images = {};
+  var eventDetails = {};
+
+  conn.query(query, [eventId], (err, results) => {
+    if (err) {
+      console.error("Error fetching Data:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch Data" });
+    }
+
+    images = results;
+  });
+
+  const query2 = `
+    SELECT * FROM Events WHERE Events.id = ?
+  `;
+
+  conn.query(query2, [eventId], (err, results) => {
+    if (err) {
+      console.error("Error fetching Data:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch Data" });
+    }
+
+    eventDetails = results;
+    res.status(200).json({
+      success: true,
+      event: {
+        eventDetails: eventDetails,
+        images: images,
+      },
+    });
+  });
+});
 
 // PUT route to update an event
-router.put("/events/:id", (req, res, next) => {
+router.put("/event/:id", (req, res, next) => {
   const { id } = req.params;
   // Assuming body contains fields to update
   const updates = req.body;
@@ -313,7 +392,7 @@ router.put("/events/:id", (req, res, next) => {
   });
 });
 
-router.delete("/events/:id", (req, res, next) => {
+router.delete("/event/:id", (req, res, next) => {
   const { id } = req.params;
   const query = "DELETE FROM Events WHERE id = ?";
 
