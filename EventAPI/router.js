@@ -11,14 +11,23 @@ const storage = multer.diskStorage({
     cb(null, path.join(__dirname, "uploads"));
   },
   filename: function (req, file, cb) {
-    // Temporary unique name for the file
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(
-      null,
-      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
-    );
+    const timestamp = Date.now();
+    const name = req.body.name || "default"; // Fallback name in case it's not provided
+    const formattedName = name.replace(/\s+/g, "_");
+    const extension = path.extname(file.originalname).toLowerCase();
+    let filenamePrefix = "";
+
+    if (file.fieldname === "hero_img") {
+      filenamePrefix = `category_heroimg_${formattedName}_${timestamp}`;
+    } else if (file.fieldname === "logo_img") {
+      filenamePrefix = `category_iconimg_${formattedName}_${timestamp}`;
+    }
+
+    const newName = `${filenamePrefix}${extension}`;
+    cb(null, newName);
   },
 });
+
 const upload = multer({ storage: storage });
 
 router.get("/", function (req, res) {
@@ -56,14 +65,18 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
       // Construct the path that will be saved in the database
       const savePath = `uploads/${newFilename}`;
 
-      // Insert file information into the database, including created_at
+      // Insert file information into the database, including created_at and is_approved
       const query =
-        "INSERT INTO Event_Files (event_id, filename, type, path, created_at) VALUES (?, ?, ?, ?, NOW())";
+        "INSERT INTO Event_Files (event_id, filename, type, path, created_at, is_approved) VALUES (?, ?, ?, ?, NOW(), 1)";
       await conn.query(query, [event_id, newFilename, mimetype, savePath]);
     }
 
     console.log("Files uploaded successfully");
-    res.json({ success: true, message: "Files uploaded successfully" });
+    res.json({
+      success: true,
+      message: "Files uploaded successfully",
+      is_approved: 1,
+    });
   } catch (err) {
     console.error("Error uploading files:", err);
     res.status(500).json({ success: false, message: "Invalid File Format" });
@@ -86,14 +99,14 @@ router.get("/event-files", (req, res, next) => {
 
 //API for EVENT-CATEGORIES
 router.post(
-  "/categories",
+  "/category",
   upload.fields([
     { name: "hero_img", maxCount: 1 },
     { name: "logo_img", maxCount: 1 },
   ]),
   (req, res, next) => {
     // Extract required data from the request body
-    const { name, is_active } = req.body;
+    const { name, is_active, parent_category_id } = req.body;
     const hero_img = req.files["hero_img"][0];
     const logo_img = req.files["logo_img"][0];
 
@@ -143,12 +156,12 @@ router.post(
 
     // Query the database to fetch the category_id for the given category name
     const categoryIdQuery = `
-      SELECT category_id FROM categories WHERE name = ?
+      SELECT parent_category_id FROM categories WHERE name = ?
     `;
 
     conn.query(categoryIdQuery, [name], (queryErr, queryResult) => {
       if (queryErr) {
-        console.error("Error fetching category_id:", queryErr);
+        console.error("Error fetching parent_category_id:", queryErr);
         return res.status(500).json({
           success: false,
           message: "Failed to fetch category_id",
@@ -163,36 +176,25 @@ router.post(
       //   });
       // }
 
-      const categoryId = queryResult[0].category_id;
+      const categoryId = queryResult[0]?.parent_category_id || 0;
 
       // Generate timestamp
       const timestamp = Date.now();
+      const formattedName = name.replace(/\s+/g, "_");
 
       // Construct the paths with file extensions
-      const heroImgPath = `category_heroimg_${categoryId}_${timestamp}.${hero_img_extension}`;
-      const logoImgPath = `category_iconimg_${categoryId}_${timestamp}.${logo_img_extension}`;
-
-      const heroImgNewPath = path.join(__dirname, "uploads", heroImgPath);
-      const logoImgNewPath = path.join(__dirname, "uploads", logoImgPath);
-
+      const heroImgPath = `category_heroimg_${formattedName}_${timestamp}.${hero_img_extension}`;
+      const logoImgPath = `category_iconimg_${formattedName}_${timestamp}.${logo_img_extension}`;
       // Construct the SQL query to insert a new category into the database
       const query = `
-        INSERT INTO categories (category_id, name, hero_img, logo_img, is_active) 
+        INSERT INTO categories (parent_category_id, name, hero_img, logo_img, is_active) 
         VALUES (?, ?, ?, ?, ?)
       `;
 
       // Execute the query
       conn.query(
         query,
-        [
-          categoryId,
-          name,
-          heroImgPath,
-          logoImgPath,
-          isActiveInt,
-          heroImgNewPath,
-          logoImgNewPath,
-        ],
+        [parent_category_id, name, heroImgPath, logoImgPath, isActiveInt],
         (err, result) => {
           if (err) {
             console.error("Error creating category:", err);
@@ -202,12 +204,10 @@ router.post(
               error: err.message, // Return the error message for debugging
             });
           }
-
-          // Return success response if the category was created successfully
           res.status(201).json({
             success: true,
             message: "Category created successfully",
-            category_id: categoryId,
+            parent_category_id: categoryId,
             hero_img_path: heroImgPath,
             logo_img_path: logoImgPath,
           });
@@ -218,9 +218,11 @@ router.post(
 );
 
 // Route handler for getting all event categories
-router.get("/categories/:category_id", (req, res, next) => {
+router.get("/category/:category_id", (req, res, next) => {
   const categoryId = req.params.category_id;
-  const query = "SELECT * FROM categories WHERE category_id = ?";
+  const query = "SELECT * FROM categories WHERE id = ? and is_active = 1";
+  const query2 =
+    "SELECT * FROM categories WHERE parent_category_id = ? and is_active = 1";
 
   conn.query(query, [categoryId], (err, results) => {
     if (err) {
@@ -230,7 +232,10 @@ router.get("/categories/:category_id", (req, res, next) => {
         .json({ success: false, message: "Failed to fetch categories" });
     }
 
-    res.status(200).json({ success: true, categories: results });
+    res.status(200).json({
+      success: true,
+      categories: { results, sub_categories: sub_categories },
+    });
   });
 });
 // POST route to create a new event
@@ -261,13 +266,24 @@ router.post("/event", (req, res, next) => {
       .status(400)
       .json({ message: "City, state, and country must be strings" });
   }
-
+  if (typeof zip_code !== "number") {
+    return res.status(400).json({ message: "Zip code is invalid" });
+  }
   // Ensure city, state, and country match the expected format
   const regex = /^[a-zA-Z]+$/;
   if (!regex.test(city) || !regex.test(state) || !regex.test(country)) {
     return res
       .status(400)
       .json({ message: "Invalid characters in city, state, or country name" });
+  }
+  const now = new Date();
+  if (new Date(start_date_time) < now) {
+    return res.status(400).json({ message: "Start date_time is invalid" });
+  }
+
+  // Validate end_date_time is after start_date_time
+  if (new Date(end_date_time) <= new Date(start_date_time)) {
+    return res.status(400).json({ message: "End date_time is invalid" });
   }
 
   // Construct the INSERT query with the uploaded_at column
