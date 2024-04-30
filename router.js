@@ -13,46 +13,41 @@ router.get("/", function (req, res) {
 
 app.use(express.static(__dirname + "/"));
 
-router.post("/register", signupValidation, (req, res, next) => {
-  db.query(
-    `SELECT * FROM users WHERE LOWER(email) = LOWER(${db.escape(
-      req.body.email
-    )});`,
-    (err, result) => {
-      if (result.length) {
-        return res.status(409).send({
-          msg: "This user is already in use!",
-        });
-      } else {
-        // username is available
-        bcrypt.hash(req.body.password, 10, (err, hash) => {
-          if (err) {
-            return res.status(500).send({
-              msg: err,
-            });
-          } else {
-            // has hashed pw => add to database
-            db.query(
-              `INSERT INTO users (name, email, password) VALUES ('${
-                req.body.name
-              }', ${db.escape(req.body.email)}, ${db.escape(hash)})`,
-              (err, result) => {
-                if (err) {
-                  throw err;
-                  return res.status(400).send({
-                    msg: err,
-                  });
-                }
-                return res.status(201).send({
-                  msg: "The user has been registerd with us!",
-                });
-              }
-            );
-          }
-        });
-      }
+router.post("/register", signupValidation, async (req, res, next) => {
+  try {
+    const existingUser = await db.query(
+      `SELECT * FROM users WHERE LOWER(email) = LOWER(?)`,
+      [req.body.email]
+    );
+
+    if (existingUser.length) {
+      return res.status(409).send({
+        msg: "This user is already in use!",
+      });
     }
-  );
+
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+
+    await db.query(
+      `INSERT INTO users (email, password, phoneNumber, firstName, lastName) VALUES (?, ?, ?, ?, ?)`,
+      [
+        req.body.email,
+        hashedPassword,
+        req.body.phoneNumber,
+        req.body.firstName,
+        req.body.lastName,
+      ]
+    );
+
+    return res.status(201).send({
+      msg: "The user has been registered with us!",
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    return res.status(500).send({
+      msg: "Internal server error",
+    });
+  }
 });
 
 router.post("/login", loginValidation, (req, res, next) => {
