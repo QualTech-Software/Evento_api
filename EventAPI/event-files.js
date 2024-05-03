@@ -35,10 +35,8 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
 
       // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
       if (!["image/png", "image/jpeg", "image/jpg"].includes(mimetype)) {
-        console.error("Invalid mimetype:", mimetype);
-        // Delete the file if it doesn't have a valid extension
         fs.unlinkSync(file.path);
-        console.log(file.path);
+
         continue; // Skip saving the file to the database
       }
 
@@ -59,14 +57,12 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
       fs.renameSync(file.path, path.join(__dirname, "uploads", newFilename));
     }
 
-    console.log("Files uploaded successfully");
     res.json({
       success: true,
       message: "Files uploaded successfully",
       is_approved: 1,
     });
   } catch (err) {
-    console.error("Error uploading files:", err);
     res.status(500).json({ success: false, message: "Invalid File Format" });
   }
 });

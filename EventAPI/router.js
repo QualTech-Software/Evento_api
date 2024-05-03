@@ -51,8 +51,6 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
 
       // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
       if (!["image/png", "image/jpeg", "image/jpg"].includes(mimetype)) {
-        console.error("Invalid mimetype:", mimetype);
-        // Delete the file if it doesn't have a valid extension
         fs.unlinkSync(file.path);
         continue; // Skip saving the file to the database
       }
@@ -71,14 +69,12 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
       await conn.query(query, [event_id, newFilename, mimetype, savePath]);
     }
 
-    console.log("Files uploaded successfully");
     res.json({
       success: true,
       message: "Files uploaded successfully",
       is_approved: 1,
     });
   } catch (err) {
-    console.error("Error uploading files:", err);
     res.status(500).json({ success: false, message: "Invalid File Format" });
   }
 });
@@ -88,7 +84,6 @@ router.get("/event-files", (req, res, next) => {
 
   conn.query(query, (err, results) => {
     if (err) {
-      console.error("Error querying database:", err);
       return res
         .status(500)
         .json({ success: false, message: "Failed to fetch uploaded files" });
@@ -161,7 +156,6 @@ router.post(
 
     conn.query(categoryIdQuery, [name], (queryErr, queryResult) => {
       if (queryErr) {
-        console.error("Error fetching parent_category_id:", queryErr);
         return res.status(500).json({
           success: false,
           message: "Failed to fetch category_id",
@@ -197,7 +191,6 @@ router.post(
         [parent_category_id, name, heroImgPath, logoImgPath, isActiveInt],
         (err, result) => {
           if (err) {
-            console.error("Error creating category:", err);
             return res.status(500).json({
               success: false,
               message: "Failed to create category",

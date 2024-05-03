@@ -127,14 +127,8 @@ router.get("/events", (req, res, next) => {
   });
 });
 
-// GET route to fetch all events
 router.post("/filtered-events/", (req, res, next) => {
-  const locationPathPrefix = "http://localhost:3000/";
   const data = req.body;
-
-  console.log(JSON.stringify(data));
-
-  console.log(data);
 
   let whereSql = [];
   if (data?.is_paid == "0" || data?.is_paid == "1") {
@@ -150,7 +144,7 @@ router.post("/filtered-events/", (req, res, next) => {
       (date) =>
         `( Events.start_date_time <= '${date}' AND Events.end_date_time >= '${date}'  )`
     );
-    console.log(dateSQLs);
+
     if (dateSQLs.length > 0) {
       whereSql.push(" AND (" + dateSQLs.join(" OR ") + ")");
     }
@@ -166,7 +160,6 @@ router.post("/filtered-events/", (req, res, next) => {
     whereSql.push(` AND DATE(Events.start_date_time) = '${currentDate}'`);
   }
 
-  // Add condition to filter events for tomorrow
   if (data?.tomorrow) {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1); // Get the next day
@@ -198,8 +191,6 @@ router.post("/filtered-events/", (req, res, next) => {
     GROUP BY 
       events.id
   `;
-
-  console.log(query);
 
   conn.query(query, (err, results) => {
     if (err) return next(err);
@@ -269,7 +260,6 @@ router.get("/event/:id", (req, res, next) => {
 
   conn.query(query2, [eventId], (err, results) => {
     if (err) {
-      console.error("Error fetching Data:", err);
       return res
         .status(500)
         .json({ success: false, message: "Failed to fetch Data" });
