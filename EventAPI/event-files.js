@@ -3,34 +3,22 @@ const router = express.Router();
 const conn = require("./dbConnection");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, path.join(__dirname, "uploads"));
   },
   filename: function (req, file, cb) {
-    const timestamp = Date.now();
-    const formattedName = (req.body.name || "default").replace(/\s+/g, "_");
-    const extension = path.extname(file.originalname).toLowerCase();
-
-    // Determine the prefix based on the fieldname
-    let filenamePrefix = "";
-    if (file.fieldname === "hero_img") {
-      filenamePrefix = "category_heroimg";
-    } else if (file.fieldname === "logo_img") {
-      filenamePrefix = "category_logoimg";
-    } else {
-      // Handle unexpected fieldname
-      return cb(new Error("Unexpected fieldname"));
-    }
-
-    const filename = `${filenamePrefix}_${formattedName}_${timestamp}${extension}`;
-    cb(null, filename);
+    // Temporary unique name for the file
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(
+      null,
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
+    );
   },
 });
-
 const upload = multer({ storage: storage });
-
 router.post("/event-files", upload.array("filename", 4), async (req, res) => {
   try {
     const { event_id } = req.body;
@@ -47,14 +35,13 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
 
       // Check if mimetype is a valid image MIME type ('image/png', 'image/jpeg', 'image/gif')
       if (!["image/png", "image/jpeg", "image/jpg"].includes(mimetype)) {
-        console.error("Invalid mimetype:", mimetype);
-        // Delete the file if it doesn't have a valid extension
         fs.unlinkSync(file.path);
+
         continue; // Skip saving the file to the database
       }
 
       const timestamp = Date.now();
-      // Construct new filename to ensure uniqueness
+      // Construct new filename to ensure uniqueness and match database format
       const newFilename = `img_${event_id}_${timestamp}${path.extname(
         filename
       )}`;
@@ -65,16 +52,17 @@ router.post("/event-files", upload.array("filename", 4), async (req, res) => {
       const query =
         "INSERT INTO Event_Files (event_id, filename, type, path, created_at, is_approved) VALUES (?, ?, ?, ?, NOW(), 1)";
       await conn.query(query, [event_id, newFilename, mimetype, savePath]);
+
+      // Rename the uploaded file to match the database filename
+      fs.renameSync(file.path, path.join(__dirname, "uploads", newFilename));
     }
 
-    console.log("Files uploaded successfully");
     res.json({
       success: true,
       message: "Files uploaded successfully",
       is_approved: 1,
     });
   } catch (err) {
-    console.error("Error uploading files:", err);
     res.status(500).json({ success: false, message: "Invalid File Format" });
   }
 });
@@ -89,6 +77,10 @@ router.get("/event-files", (req, res, next) => {
         .status(500)
         .json({ success: false, message: "Failed to fetch uploaded files" });
     }
+    // Modify the path of each file to match the upload directory
+    results.forEach((file) => {
+      file.path = path.join(__dirname, file.path);
+    });
     res.status(200).json({ success: true, files: results });
   });
 });

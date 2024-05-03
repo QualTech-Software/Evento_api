@@ -167,6 +167,7 @@ router.get("/categories/main", (req, res, next) => {
   const query = `
     SELECT 
       id AS category_id,
+      parent_category_id,
       name,
       CONCAT('http://localhost:3000/uploads/', hero_img) AS hero_img, 
       CONCAT('http://localhost:3000/uploads/', logo_img) AS logo_img
