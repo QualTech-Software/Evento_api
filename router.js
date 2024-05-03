@@ -50,11 +50,13 @@ router.post("/register", signupValidation, async (req, res, next) => {
   }
 });
 
+let tokenAccessCount = 0; // Initialize token access counter
+
 router.post("/login", loginValidation, (req, res, next) => {
   db.query(
     `SELECT * FROM users WHERE email = ${db.escape(req.body.email)};`,
     (err, result) => {
-      // user does not exists
+      // user does not exist
       if (err) {
         throw err;
         return res.status(400).send({
@@ -87,6 +89,11 @@ router.post("/login", loginValidation, (req, res, next) => {
             db.query(
               `UPDATE users SET last_login = now() WHERE id = '${result[0].id}'`
             );
+
+            // Increment token access count and log it
+            tokenAccessCount++;
+            console.log("Token access count:", tokenAccessCount);
+
             return res.status(200).send({
               msg: "Logged in!",
               token,
