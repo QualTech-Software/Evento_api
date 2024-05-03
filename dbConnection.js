@@ -1,8 +1,8 @@
 var mysql = require("mysql");
 var conn = mysql.createConnection({
   host: "localhost", // Replace with your host name
-  user: "test", // Replace with your database username
-  password: "test", // Replace with your database password
+  user: "root", // Replace with your database username
+  password: "", // Replace with your database password
   database: "node-app", // // Replace with your database Name
 });
 

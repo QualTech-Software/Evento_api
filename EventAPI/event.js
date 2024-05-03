@@ -100,13 +100,139 @@ router.post("/event", (req, res, next) => {
 
 // GET route to fetch all events
 router.get("/events", (req, res, next) => {
-  const query = "SELECT * FROM Events";
+  const locationPathPrefix = "http://localhost:3000/";
+  const query = `
+    SELECT 
+      CONCAT( 
+        "[", 
+        GROUP_CONCAT(
+          CONCAT('{ "filename":"', Event_Files.filename, '", "path":"${locationPathPrefix}', Event_Files.path, '"}')
+        ), 
+        "]" 
+      ) as files, 
+      events.* 
+    FROM 
+      Events 
+    LEFT JOIN 
+      Event_Files 
+    ON 
+      Events.id = Event_Files.event_id 
+    GROUP BY 
+      events.id
+  `;
 
   conn.query(query, (err, results) => {
     if (err) return next(err);
     res.status(200).json(results);
   });
 });
+
+// GET route to fetch all events
+router.post("/filtered-events/", (req, res, next) => {
+  const locationPathPrefix = "http://localhost:3000/";
+  const data = req.body;
+
+  console.log(JSON.stringify(data));
+
+  console.log(data);
+
+  let whereSql = [];
+  if (data?.is_paid == "0" || data?.is_paid == "1") {
+    whereSql.push(" AND Events.is_paid = " + data["is_paid"]);
+  }
+
+  if (data?.category_id) {
+    whereSql.push(" AND Events.category_id = " + data["category_id"]);
+  }
+
+  if (data?.dates && data?.dates?.length > 0) {
+    let dateSQLs = data?.dates.map(
+      (date) =>
+        `( Events.start_date_time <= '${date}' AND Events.end_date_time >= '${date}'  )`
+    );
+    console.log(dateSQLs);
+    if (dateSQLs.length > 0) {
+      whereSql.push(" AND (" + dateSQLs.join(" OR ") + ")");
+    }
+  }
+
+  if (data?.is_paid) {
+    whereSql.push(` AND is_paid = '${data?.is_paid}'`);
+  }
+
+  // Add condition to filter events for today
+  if (data?.today) {
+    const currentDate = new Date().toISOString().slice(0, 10); // Get current date in YYYY-MM-DD format
+    whereSql.push(` AND DATE(Events.start_date_time) = '${currentDate}'`);
+  }
+
+  // Add condition to filter events for tomorrow
+  if (data?.tomorrow) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1); // Get the next day
+    const tomorrowDate = tomorrow.toISOString().slice(0, 10); // Get tomorrow's date in YYYY-MM-DD format
+    whereSql.push(
+      ` AND (DATE(Events.start_date_time) = '${tomorrowDate}' OR DATE(Events.end_date_time) = '${tomorrowDate}')`
+    );
+  }
+
+  const query = `
+    SELECT 
+      CONCAT( 
+        "[", 
+        GROUP_CONCAT(
+          CONCAT('{ "filename":"', Event_Files.filename, '", "path":"${locationPathPrefix}', Event_Files.path, '"}')
+        ), 
+        "]" 
+      ) as files, 
+      events.* 
+    FROM 
+      Events 
+    LEFT JOIN 
+      Event_Files 
+    ON 
+      Events.id = Event_Files.event_id 
+    WHERE
+         1 
+    ${whereSql.join(" ")}
+    GROUP BY 
+      events.id
+  `;
+
+  console.log(query);
+
+  conn.query(query, (err, results) => {
+    if (err) return next(err);
+    res.status(200).json(results);
+  });
+});
+
+router.get("/categories-events/:category_id", (req, res, next) => {
+  const categoryId = req.params.category_id;
+  const locationPathPrefix = "http://localhost:3000/";
+  const query =
+    'SELECT CONCAT( "[", GROUP_CONCAT(concat(\'{ "filename":"\',Event_Files.filename,\'", path:"' +
+    +locationPathPrefix +
+    +"', Event_Files.path, '\"}') ), \"]\" ) as files, events.* FROM Events INNER JOIN Event_Files ON Events.id = Event_Files.event_id WHERE events.category_id = " +
+    categoryId +
+    " GROUP BY events.id;";
+
+  conn.query(query, (err, results) => {
+    if (err) return next(err);
+    res.status(200).json(results);
+  });
+});
+
+// GET route to fetch all events
+// router.get("/events", (req, res, next) => {
+//   const query = "SELECT * FROM Events";
+
+//   conn.query(query, (err, results) => {
+//     if (err) return next(err);
+//     res.status(200).json(results);
+//   });
+// });
+
 //GET for given id
 router.get("/event/:id", (req, res, next) => {
   const eventId = req.params.id;
@@ -116,6 +242,12 @@ router.get("/event/:id", (req, res, next) => {
     INNER JOIN Event_Files ON Events.id = Event_Files.event_id
     WHERE Events.id = ?
   `;
+  /**
+   * 
+   * SELECT   GROUP_CONCAT(concat('{ "filename":"',Event_Files.filename,'", path:"', Event_Files.path, '"}') ), events.* 
+    FROM Events
+    INNER JOIN Event_Files ON Events.id = Event_Files.event_id;
+   */
 
   var images = {};
   var eventDetails = {};
