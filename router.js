@@ -43,7 +43,6 @@ router.post("/register", signupValidation, async (req, res, next) => {
       msg: "The user has been registered with us!",
     });
   } catch (error) {
-    console.error("Registration error:", error);
     return res.status(500).send({
       msg: "Internal server error",
     });
